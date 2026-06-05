@@ -35,6 +35,16 @@ cmake --build build
 windeployqt --no-translations build\sd_studio.exe   :: copy Qt DLLs next to the exe
 ```
 
+**Linux (Ninja + gcc):**
+```bash
+sudo apt install qt6-base-dev ninja-build cmake g++   # or use aqt / Qt online installer
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release   # add -DCMAKE_PREFIX_PATH=<qt> if needed
+cmake --build build                                       # -> build/sd_studio
+```
+Provide a Linux `sd` / `sd-cli` backend under `~/.cache/lemonade/bin/sd-cpp/<backend>/`
+(or set the **sd-cpp dir** in the UI) — e.g. the Linux builds from the
+[stable-diffusion.cpp releases](https://github.com/leejet/stable-diffusion.cpp/releases).
+
 ## Run
 Launch `build\sd_studio.exe`. The HTTP server starts on port **8801** (configurable in the UI).
 ```powershell

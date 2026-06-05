@@ -36,7 +36,12 @@ static std::function<void(const QImage&)>    g_showImage = [](const QImage&){};
 
 static QString findSdCli(const QString& backend) {
     QString base = g_cfg.sdRoot + "/" + backend;
-    QDirIterator it(base, {"sd*.exe"}, QDir::Files, QDirIterator::Subdirectories);
+#ifdef Q_OS_WIN
+    const QStringList pats = { "sd*.exe" };
+#else
+    const QStringList pats = { "sd-cli", "sd" };   // Linux/macOS: no .exe
+#endif
+    QDirIterator it(base, pats, QDir::Files, QDirIterator::Subdirectories);
     return it.hasNext() ? it.next() : QString();
 }
 
@@ -346,6 +351,10 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName("xLights");
     QApplication::setApplicationName("SDStudio");
     QApplication::setWindowIcon(QIcon(":/sd_studio.png"));
+
+#ifndef Q_OS_WIN
+    g_cfg.modelsDir = QDir::homePath() + "/sd-models";   // sensible non-Windows default
+#endif
 
     // Portable mode: if sd-cpp/ and models/ are shipped next to the exe, prefer
     // them over saved settings so the bundle is self-contained on any machine.
