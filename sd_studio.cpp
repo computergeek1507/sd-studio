@@ -154,7 +154,16 @@ static GenRes generate(GenReq r) {
     }
     const QString sdout = QString::fromLocal8Bit(proc.readAll());
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0 || !QFileInfo::exists(out)) {
-        res.error = "sd-cli failed (rc=" + QString::number(proc.exitCode()) + "): " + sdout.right(500);
+        // A LoRA whose architecture doesn't match the base model trips an assert
+        // in sd-cli's lora.hpp (tensor element-count mismatch) -> hard crash.
+        if (!r.lora.isEmpty() && (sdout.contains("lora.hpp") || sdout.contains("ggml_nelements"))) {
+            res.error = "LoRA '" + r.lora + "' doesn't match this model's architecture.\n"
+                        "Use an SDXL LoRA (e.g. pixel-art-xl) with an SDXL model "
+                        "(e.g. DreamShaper XL Turbo), and an SD-1.5 LoRA (e.g. PixelArtRedmond) "
+                        "with an SD-1.5 model.";
+        } else {
+            res.error = "sd-cli failed (rc=" + QString::number(proc.exitCode()) + "): " + sdout.right(500);
+        }
         return res;
     }
 
