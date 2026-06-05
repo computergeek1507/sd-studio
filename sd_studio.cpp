@@ -315,6 +315,32 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// Stream a download straight to disk. reply->readAll() buffers the whole file
+// in RAM, which corrupts/fails for multi-GB models (e.g. SDXL ~6.6 GB).
+static void startDownload(QNetworkAccessManager* nam, const QUrl& url, const QString& dest,
+                          QProgressBar* bar, std::function<void()> onDone) {
+    QFile* file = new QFile(dest);
+    if (!file->open(QIODevice::WriteOnly)) { g_log("Cannot open " + dest); delete file; return; }
+    QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply* rep = nam->get(req);
+    bar->setRange(0, 100); bar->setValue(0);
+    QObject::connect(rep, &QNetworkReply::readyRead, [rep, file]() { file->write(rep->readAll()); });
+    QObject::connect(rep, &QNetworkReply::downloadProgress, [bar](qint64 a, qint64 b) { if (b > 0) bar->setValue(int(100 * a / b)); });
+    QObject::connect(rep, &QNetworkReply::finished, [rep, file, dest, onDone]() {
+        file->write(rep->readAll());
+        file->close();
+        const bool ok = rep->error() == QNetworkReply::NoError;
+        const QString err = rep->errorString();
+        delete file;
+        rep->deleteLater();
+        if (!ok) { g_log("Download failed: " + err); QFile::remove(dest); return; }
+        g_log("Saved " + dest);
+        if (onDone) onDone();
+    });
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("xLights");
@@ -502,21 +528,7 @@ int main(int argc, char** argv) {
         const QString dest = QDir(modelsDir->text()).absoluteFilePath(QFileInfo(file).fileName());
 
         g_log("Downloading " + url.toString());
-        QNetworkRequest req(url);
-        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-        QNetworkReply* rep = nam->get(req);
-        bar->setRange(0, 100); bar->setValue(0);
-        QObject::connect(rep, &QNetworkReply::downloadProgress, [bar](qint64 r, qint64 t) {
-            if (t > 0) bar->setValue(int(100 * r / t));
-        });
-        QObject::connect(rep, &QNetworkReply::finished, [=]() {
-            rep->deleteLater();
-            if (rep->error() != QNetworkReply::NoError) { g_log("Download failed: " + rep->errorString()); return; }
-            QFile f(dest);
-            if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); g_log("Saved " + dest);
-                refreshModels(); model->setCurrentText(QFileInfo(dest).fileName()); }
-            else g_log("Cannot write " + dest);
-        });
+        startDownload(nam, url, dest, bar, [=]() { refreshModels(); model->setCurrentText(QFileInfo(dest).fileName()); });
     });
 
     // LoRA download (Hugging Face) -> <modelsDir>/loras
@@ -540,21 +552,7 @@ int main(int argc, char** argv) {
         const QString dest = QDir(ldir).absoluteFilePath(QFileInfo(file).fileName());
 
         g_log("Downloading LoRA " + url.toString());
-        QNetworkRequest req(url);
-        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-        QNetworkReply* rep = nam->get(req);
-        bar->setRange(0, 100); bar->setValue(0);
-        QObject::connect(rep, &QNetworkReply::downloadProgress, [bar](qint64 r, qint64 t) {
-            if (t > 0) bar->setValue(int(100 * r / t));
-        });
-        QObject::connect(rep, &QNetworkReply::finished, [=]() {
-            rep->deleteLater();
-            if (rep->error() != QNetworkReply::NoError) { g_log("LoRA download failed: " + rep->errorString()); return; }
-            QFile f(dest);
-            if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); g_log("Saved " + dest);
-                refreshLoras(); lora->setCurrentText(QFileInfo(dest).completeBaseName()); }
-            else g_log("Cannot write " + dest);
-        });
+        startDownload(nam, url, dest, bar, [=]() { refreshLoras(); lora->setCurrentText(QFileInfo(dest).completeBaseName()); });
     });
 
     // start the HTTP server
