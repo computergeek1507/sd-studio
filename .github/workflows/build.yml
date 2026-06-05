@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write          # needed to publish releases
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -33,14 +36,49 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      - name: Deploy Qt runtime
+      - name: Stage app + Qt runtime
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item build\sd_studio.exe dist\
-          windeployqt --release --no-translations dist\sd_studio.exe
+          Copy-Item README.md dist\ -ErrorAction SilentlyContinue
+          windeployqt --release --no-translations --compiler-runtime dist\sd_studio.exe
 
-      - name: Upload artifact
+      # Bundle the Vulkan sd-cli backend (broad GPU support, no CUDA runtime
+      # needed) so the release runs out of the box; a model is fetched in-app.
+      - name: Bundle Vulkan sd-cli backend
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $url = gh api repos/leejet/stable-diffusion.cpp/releases/latest `
+            --jq '.assets[] | select(.name | test("win-vulkan-x64")) | .browser_download_url'
+          Write-Host "vulkan backend: $url"
+          curl.exe -L -o vk.zip $url
+          New-Item -ItemType Directory -Force -Path dist\sd-cpp\vulkan | Out-Null
+          Expand-Archive vk.zip -DestinationPath dist\sd-cpp\vulkan -Force
+
+      - name: Zip
+        run: Compress-Archive -Path dist\* -DestinationPath SDStudio-win64.zip -Force
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sd_studio-win64
-          path: dist
+          name: SDStudio-win64
+          path: SDStudio-win64.zip
+
+      # Publish a rolling "continuous" prerelease on main, and a versioned
+      # release when a v* tag is pushed.
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SDStudio-win64.zip
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'continuous' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Continuous build (main)' }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          body: |
+            Automated SD Studio build for Windows x64.
+
+            **Contents:** `sd_studio.exe` + Qt runtime + the Vulkan `sd-cli` backend.
+            On first run, use **Download model…** to fetch a model (e.g. All-In-One Pixel).
+            Requires a Vulkan-capable GPU driver (any recent NVIDIA/AMD/Intel).
