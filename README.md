@@ -9,6 +9,10 @@ GUI **and** an embedded **OpenAI-style HTTP server** sharing one generation engi
 - Model picker from a models directory; **Hugging Face model downloader**.
 - Live preview (nearest-neighbour scaling → crisp pixels).
 - Optional **cutout** → transparent PNG (native edge flood-fill; no dependencies).
+- **LoRA support** + downloader — `--lora-model-dir` + `<lora:name:weight>` (e.g. `pixel-art-xl`
+  on SDXL, `PixelArtRedmond` on SD-1.5). LoRA files live in `<models>/loras/`.
+- **Turbo/XL-aware defaults** — auto-sets CFG + steps when an `xl`/`turbo`/`lightning` model is picked.
+- Single-file model presets incl. **DreamShaper XL Turbo** (best quality) and several pixel models.
 - Embedded HTTP server (pure `QTcpServer`, no extra deps):
   - `POST /v1/images/generations` → OpenAI-style `{"data":[{"b64_json":...}]}`
   - `POST /generate` → `{"image_b64":..., "seconds":...}`

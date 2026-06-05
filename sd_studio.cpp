@@ -53,9 +53,9 @@ static QString resolveModel(const QString& name) {
 }
 
 struct GenReq {
-    QString prompt, negative, model, backend, trigger = "pixelsprite";
+    QString prompt, negative, model, backend, trigger, lora;
     int steps = 0, width = 0, height = 0;
-    double cfg = 0;
+    double cfg = 0, loraWeight = 0.8;
     long seed = -1;
     bool cutout = false;
     bool triggerSet = false;
@@ -118,9 +118,13 @@ static GenRes generate(GenReq r) {
 
     QString prompt = r.prompt.trimmed();
     if (prompt.isEmpty()) { res.error = "prompt is required"; return res; }
-    QString trigger = r.triggerSet ? r.trigger : QString("pixelsprite");
-    if (!trigger.isEmpty() && !prompt.contains(trigger, Qt::CaseInsensitive))
-        prompt = trigger + ", " + prompt;
+    // Only prepend a trigger when one is explicitly supplied (don't force
+    // "pixelsprite" onto SDXL/other models).
+    if (r.triggerSet && !r.trigger.isEmpty() && !prompt.contains(r.trigger, Qt::CaseInsensitive))
+        prompt = r.trigger + ", " + prompt;
+    // LoRA: sd.cpp applies it via <lora:name:weight> in the prompt + --lora-model-dir.
+    if (!r.lora.isEmpty())
+        prompt += QString(" <lora:%1:%2>").arg(r.lora).arg(r.loraWeight > 0 ? r.loraWeight : 0.8);
     res.prompt = prompt;
 
     const QString outDir = g_cfg.modelsDir + "/studio-out";
@@ -136,6 +140,7 @@ static GenRes generate(GenReq r) {
         "-H", QString::number(r.height > 0 ? r.height : g_cfg.height),
         "-o", out };
     if (r.seed >= 0) args << "-s" << QString::number(r.seed);
+    if (!r.lora.isEmpty()) args << "--lora-model-dir" << (g_cfg.modelsDir + "/loras");
 
     g_log("> " + sd + " " + args.join(' '));
     QElapsedTimer timer; timer.start();
@@ -188,6 +193,8 @@ static GenReq reqFromJson(const QJsonObject& o) {
     r.seed     = o.contains("seed") ? (long)o.value("seed").toInt(-1) : -1;
     r.cutout   = o.value("cutout").toBool(false);
     if (o.contains("trigger")) { r.trigger = o.value("trigger").toString(); r.triggerSet = true; }
+    r.lora = o.value("lora").toString();
+    r.loraWeight = o.value("lora_weight").toDouble(0.8);
     if (o.contains("size")) {                            // OpenAI "512x512"
         const QStringList wh = o.value("size").toString().toLower().split('x');
         if (wh.size() == 2) { r.width = wh[0].toInt(); r.height = wh[1].toInt(); }
@@ -352,6 +359,11 @@ int main(int argc, char** argv) {
     form->addRow("Height", height);
     auto* seed = new QLineEdit("-1");
     form->addRow("Seed (-1=rnd)", seed);
+    auto* lora = new QComboBox();
+    auto* loraW = new QDoubleSpinBox(); loraW->setRange(0, 2); loraW->setSingleStep(0.1); loraW->setValue(0.8);
+    auto* loraDL = new QPushButton("DL"); loraDL->setMaximumWidth(40);
+    auto* loraRow = new QHBoxLayout(); loraRow->addWidget(lora, 1); loraRow->addWidget(loraW); loraRow->addWidget(loraDL);
+    form->addRow("LoRA", loraRow);
     auto* cutout = new QCheckBox("Cutout background (transparent PNG)");
     form->addRow("", cutout);
     auto* port = new QSpinBox(); port->setRange(1, 65535); port->setValue(g_cfg.port);
@@ -408,13 +420,32 @@ int main(int argc, char** argv) {
         for (const QString& f : files) model->addItem(f, d.absoluteFilePath(f));
         if (model->count()) model->setCurrentIndex(0);
     };
+    auto refreshLoras = [=]() {
+        lora->clear();
+        lora->addItem("(none)", QString());
+        QDir d(modelsDir->text() + "/loras");
+        for (const QString& f : d.entryList({ "*.safetensors" }, QDir::Files, QDir::Name))
+            lora->addItem(QFileInfo(f).completeBaseName(), QFileInfo(f).completeBaseName());
+    };
+
+    // Turbo/XL-aware defaults: pick sensible CFG + steps for the selected model.
+    QObject::connect(model, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) {
+        const QString n = model->currentText().toLower();
+        if (n.isEmpty()) return;
+        if      (n.contains("turbo"))     { steps->setValue(8);  cfg->setValue(2.0); }
+        else if (n.contains("lightning")) { steps->setValue(6);  cfg->setValue(1.5); }
+        else if (n.contains("xl"))        { steps->setValue(26); cfg->setValue(6.0); }
+        else                              { steps->setValue(20); cfg->setValue(7.0); }
+    });
+
     refreshModels();
+    refreshLoras();
     syncCfg();   // initialize g_cfg (incl. defaultModel) so the HTTP server works before any GUI click
 
-    QObject::connect(refresh, &QPushButton::clicked, refreshModels);
+    QObject::connect(refresh, &QPushButton::clicked, [=]() { refreshModels(); refreshLoras(); });
     QObject::connect(browse, &QPushButton::clicked, [&]() {
         QString dir = QFileDialog::getExistingDirectory(&win, "Models directory", modelsDir->text());
-        if (!dir.isEmpty()) { modelsDir->setText(dir); refreshModels(); }
+        if (!dir.isEmpty()) { modelsDir->setText(dir); refreshModels(); refreshLoras(); }
     });
 
     QObject::connect(genBtn, &QPushButton::clicked, [&]() {
@@ -427,6 +458,8 @@ int main(int argc, char** argv) {
         r.steps = steps->value(); r.cfg = cfg->value();
         r.width = width->value(); r.height = height->value();
         r.seed = seed->text().toLong();
+        r.lora = lora->currentData().toString();
+        r.loraWeight = loraW->value();
         r.cutout = cutout->isChecked();
         genBtn->setEnabled(false); bar->setRange(0, 0);   // busy indicator
         GenRes g = generate(r);
@@ -440,6 +473,7 @@ int main(int argc, char** argv) {
     auto* nam = new QNetworkAccessManager(&win);
     QObject::connect(dlBtn, &QPushButton::clicked, [&, nam]() {
         const QList<QPair<QString, QString>> presets = {
+            { "DreamShaper XL Turbo  (best quality; set CFG~2, steps~8)", "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
             { "All-In-One Pixel  (pixelsprite / 16bitscene)", "PublicPrompts/All-In-One-Pixel-Model:Public-Prompts-Pixel-Model.ckpt" },
             { "Pixel-Art Style  (pixelartstyle)",             "kohbanye/pixel-art-style:pixel-art-style.ckpt" },
             { "Pixel SpriteSheet  (PixelartFSS)",             "Onodofthenorth/SD_PixelArt_SpriteSheet_Generator:PixelartSpritesheet_V.1.ckpt" },
@@ -472,6 +506,44 @@ int main(int argc, char** argv) {
             QFile f(dest);
             if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); g_log("Saved " + dest);
                 refreshModels(); model->setCurrentText(QFileInfo(dest).fileName()); }
+            else g_log("Cannot write " + dest);
+        });
+    });
+
+    // LoRA download (Hugging Face) -> <modelsDir>/loras
+    QObject::connect(loraDL, &QPushButton::clicked, [&, nam]() {
+        const QList<QPair<QString, QString>> presets = {
+            { "PixelArtRedmond  (SD1.5, trigger PIXARFK)", "artificialguybr/pixelartredmond-1-5v-pixel-art-loras-for-sd-1-5:PixelArtRedmond15V-PixelArt-PIXARFK.safetensors" },
+            { "Pixel Art XL  (SDXL, trigger pixel)",       "nerijs/pixel-art-xl:pixel-art-xl.safetensors" },
+            { "Custom (repo:file)...",                     "" },
+        };
+        QStringList names; for (auto& p : presets) names << p.first;
+        bool ok = false;
+        QString choice = QInputDialog::getItem(&win, "Download LoRA", "LoRA:", names, 0, false, &ok);
+        if (!ok) return;
+        QString ref = presets[names.indexOf(choice)].second;
+        if (ref.isEmpty()) ref = QInputDialog::getText(&win, "Custom LoRA", "repo:file", QLineEdit::Normal, "", &ok);
+        if (!ok || !ref.contains(':')) return;
+        const QString repo = ref.section(':', 0, 0), file = ref.section(':', 1);
+        const QUrl url("https://huggingface.co/" + repo + "/resolve/main/" + file + "?download=true");
+        const QString ldir = modelsDir->text() + "/loras";
+        QDir().mkpath(ldir);
+        const QString dest = QDir(ldir).absoluteFilePath(QFileInfo(file).fileName());
+
+        g_log("Downloading LoRA " + url.toString());
+        QNetworkRequest req(url);
+        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+        QNetworkReply* rep = nam->get(req);
+        bar->setRange(0, 100); bar->setValue(0);
+        QObject::connect(rep, &QNetworkReply::downloadProgress, [bar](qint64 r, qint64 t) {
+            if (t > 0) bar->setValue(int(100 * r / t));
+        });
+        QObject::connect(rep, &QNetworkReply::finished, [=]() {
+            rep->deleteLater();
+            if (rep->error() != QNetworkReply::NoError) { g_log("LoRA download failed: " + rep->errorString()); return; }
+            QFile f(dest);
+            if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); g_log("Saved " + dest);
+                refreshLoras(); lora->setCurrentText(QFileInfo(dest).completeBaseName()); }
             else g_log("Cannot write " + dest);
         });
     });
