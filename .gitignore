@@ -1,0 +1,23 @@
+# build outputs
+build/
+build-release/
+build*/
+dist/
+
+# binaries / artifacts
+*.exe
+*.obj
+*.res
+*.zip
+
+# generated / temp images
+icon_raw.png
+exe_icon_check.png
+out.png
+*_cut.png
+
+# models (never commit weights)
+*.safetensors
+*.ckpt
+models/
+sd-cpp/
