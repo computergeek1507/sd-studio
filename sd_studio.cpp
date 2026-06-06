@@ -45,6 +45,33 @@ static QString findSdCli(const QString& backend) {
     return it.hasNext() ? it.next() : QString();
 }
 
+// Probe a backend's sd-cli for the GPU/devices it detects. With a missing model
+// it prints backend/device info during init, then fails fast (no generation).
+static QString probeBackend(const QString& backend) {
+    const QString sd = findSdCli(backend);
+    if (sd.isEmpty()) return backend + " - not installed";
+    QStringList args = { "-v", "-m", "__probe__", "-p", "x", "--steps", "1",
+                         "-W", "64", "-H", "64", "-o", QDir::tempPath() + "/sdstudio_hwprobe.png" };
+    QString prog = sd;
+    if (QFileInfo::exists("/.flatpak-info")) { args.prepend(sd); args.prepend("--host"); prog = "flatpak-spawn"; }
+    QProcess p;
+    p.setProcessChannelMode(QProcess::MergedChannels);
+    p.start(prog, args);
+    while (p.state() != QProcess::NotRunning) { p.waitForFinished(150); QCoreApplication::processEvents(); }
+    const QString out = QString::fromLocal8Bit(p.readAll());
+    const QStringList keys = { "Vulkan devices", "CUDA devices", "backend devices", "Device 0",
+                               "GeForce", "Radeon", "Arc", "= NVIDIA", "= AMD", "= Intel", "#0:", "#1:", "#2:" };
+    QStringList lines;
+    for (QString line : out.split('\n')) {
+        line = line.trimmed();
+        const int dash = line.indexOf(" - ");
+        if (dash >= 0) line = line.mid(dash + 3).trimmed();   // strip "[DEBUG] file:line - "
+        for (const QString& k : keys) if (line.contains(k)) { lines << line; break; }
+    }
+    lines.removeDuplicates();
+    return backend + ":\n  " + (lines.isEmpty() ? QString("(installed; no device info)") : lines.join("\n  "));
+}
+
 static QString resolveModel(const QString& name) {
     if (name.isEmpty()) return {};
     if (QFileInfo::exists(name)) return name;                       // absolute path
@@ -400,7 +427,9 @@ int main(int argc, char** argv) {
 
     auto* backend = new QComboBox(); backend->addItems({ "vulkan", "cuda", "cpu" });
     backend->setCurrentText(g_cfg.backend);
-    form->addRow("Backend", backend);
+    auto* hwBtn = new QPushButton(QString::fromUtf8("Hardware\xE2\x80\xA6")); hwBtn->setMaximumWidth(96);
+    auto* beRow = new QHBoxLayout(); beRow->addWidget(backend, 1); beRow->addWidget(hwBtn);
+    form->addRow("Backend", beRow);
 
     auto* sdRoot = new QLineEdit(g_cfg.sdRoot);
     form->addRow("sd-cpp dir", sdRoot);
@@ -524,6 +553,22 @@ int main(int argc, char** argv) {
         genBtn->setEnabled(true);
         if (!g.ok) { g_log("ERROR: " + g.error); QMessageBox::warning(&win, "Generate failed", g.error); }
         else g_log(QString("done in %1s").arg(g.seconds));
+    });
+
+    // Hardware / backend probe
+    QObject::connect(hwBtn, &QPushButton::clicked, [&]() {
+        syncCfg();
+        hwBtn->setEnabled(false);
+        g_log("Probing backends...");
+        QString report;
+        for (const QString& b : { QStringLiteral("vulkan"), QStringLiteral("cuda"), QStringLiteral("cpu") })
+            report += probeBackend(b) + "\n\n";
+        hwBtn->setEnabled(true);
+        QMessageBox box(&win);
+        box.setWindowTitle("SD hardware / backends");
+        box.setText("Detected SD backends and devices:\n\n" + report.trimmed());
+        box.setTextInteractionFlags(Qt::TextSelectableByMouse);
+        box.exec();
     });
 
     // model download (Hugging Face) via QNetworkAccessManager
