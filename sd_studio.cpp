@@ -578,6 +578,8 @@ int main(int argc, char** argv) {
             { "DreamShaper XL Turbo  (best quality; CFG~2, ~8 steps)", "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
             { "DreamShaper 8 LCM  (SD1.5 turbo, ~6 steps)",            "Lykon/dreamshaper-8-lcm:DreamShaper8_LCM.safetensors" },
             { "SD-Turbo  (small/fast, ~4 steps, low CFG)",             "stabilityai/sd-turbo:sd_turbo.safetensors" },
+            { "Stable Diffusion 1.5  (SD1.5 base; use with SD1.5 LoRA)", "stable-diffusion-v1-5/stable-diffusion-v1-5:v1-5-pruned-emaonly.safetensors" },
+            { "Realistic Vision 6  (SD1.5, photoreal)",                "SG161222/Realistic_Vision_V6.0_B1_noVAE:Realistic_Vision_V6.0_NV_B1_fp16.safetensors" },
             { "All-In-One Pixel  (pixelsprite / 16bitscene)", "PublicPrompts/All-In-One-Pixel-Model:Public-Prompts-Pixel-Model.ckpt" },
             { "Pixel-Art Style  (pixelartstyle)",             "kohbanye/pixel-art-style:pixel-art-style.ckpt" },
             { "Pixel SpriteSheet  (PixelartFSS)",             "Onodofthenorth/SD_PixelArt_SpriteSheet_Generator:PixelartSpritesheet_V.1.ckpt" },
