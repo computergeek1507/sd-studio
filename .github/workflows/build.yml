@@ -88,6 +88,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item build\sd_studio.exe dist\
+          Copy-Item models.json dist\
           Copy-Item README.md dist\ -ErrorAction SilentlyContinue
           windeployqt --release --no-translations --compiler-runtime dist\sd_studio.exe
 

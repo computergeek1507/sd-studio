@@ -1,0 +1,18 @@
+{
+  "models": [
+    { "name": "DreamShaper XL Turbo  (best quality; CFG~2, ~8 steps)", "checkpoint": "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
+    { "name": "DreamShaper 8 LCM  (SD1.5 turbo, ~6 steps)",            "checkpoint": "Lykon/dreamshaper-8-lcm:DreamShaper8_LCM.safetensors" },
+    { "name": "SD-Turbo  (small/fast, ~4 steps, low CFG)",             "checkpoint": "stabilityai/sd-turbo:sd_turbo.safetensors" },
+    { "name": "Stable Diffusion 1.5  (SD1.5 base)",                    "checkpoint": "stable-diffusion-v1-5/stable-diffusion-v1-5:v1-5-pruned-emaonly.safetensors" },
+    { "name": "Realistic Vision 6  (SD1.5, photoreal)",                "checkpoint": "SG161222/Realistic_Vision_V6.0_B1_noVAE:Realistic_Vision_V6.0_NV_B1_fp16.safetensors" },
+    { "name": "All-In-One Pixel  (pixelsprite / 16bitscene)",          "checkpoint": "PublicPrompts/All-In-One-Pixel-Model:Public-Prompts-Pixel-Model.ckpt" },
+    { "name": "Pixel-Art Style  (pixelartstyle)",                      "checkpoint": "kohbanye/pixel-art-style:pixel-art-style.ckpt" },
+    { "name": "Pixel SpriteSheet  (PixelartFSS)",                      "checkpoint": "Onodofthenorth/SD_PixelArt_SpriteSheet_Generator:PixelartSpritesheet_V.1.ckpt" },
+    { "name": "Voxel Art  (VoxelArt)",                                 "checkpoint": "Fictiverse/Stable_Diffusion_VoxelArt_Model:VoxelArt_v1.safetensors" },
+    { "name": "Paper Cut  (PaperCut)",                                 "checkpoint": "Fictiverse/Stable_Diffusion_PaperCut_Model:PaperCut_v1.safetensors" }
+  ],
+  "loras": [
+    { "name": "PixelArtRedmond  (SD1.5, trigger PIXARFK)", "checkpoint": "artificialguybr/pixelartredmond-1-5v-pixel-art-loras-for-sd-1-5:PixelArtRedmond15V-PixelArt-PIXARFK.safetensors" },
+    { "name": "Pixel Art XL  (SDXL, trigger pixel)",       "checkpoint": "nerijs/pixel-art-xl:pixel-art-xl.safetensors" }
+  ]
+}

@@ -20,9 +20,19 @@ if(WIN32)
 endif()
 target_link_libraries(sd_studio PRIVATE Qt6::Widgets Qt6::Network)
 
+# Bake the git short SHA as the version string (used by the in-app update check).
+execute_process(
+    COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=7 HEAD
+    OUTPUT_VARIABLE SDSTUDIO_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT SDSTUDIO_GIT_SHA)
+    set(SDSTUDIO_GIT_SHA "dev")
+endif()
+target_compile_definitions(sd_studio PRIVATE SDSTUDIO_VERSION="${SDSTUDIO_GIT_SHA}")
+
 # Install rules (used by Flatpak / Linux packaging).
 include(GNUInstallDirs)
 install(TARGETS sd_studio RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES models.json DESTINATION ${CMAKE_INSTALL_BINDIR})   # bundled fallback model list
 if(UNIX AND NOT APPLE)
     set(SDSTUDIO_APPID io.github.computergeek1507.SDStudio)
     install(FILES sd_studio.png

@@ -34,6 +34,34 @@ static std::atomic<bool>     g_busy{false};
 static std::function<void(const QString&)>  g_log = [](const QString&){};
 static std::function<void(const QImage&)>    g_showImage = [](const QImage&){};
 
+#ifndef SDSTUDIO_VERSION
+#define SDSTUDIO_VERSION "dev"   // overridden by CMake with the git short SHA
+#endif
+
+// Download presets ("Name", "repo:file"). Built-in defaults, optionally
+// replaced at startup by models.json fetched from the GitHub repo.
+struct Preset { QString name, ref; };
+static QList<Preset> g_models, g_loras;
+
+static void loadBuiltinPresets() {
+    g_models = {
+        { "DreamShaper XL Turbo  (best quality; CFG~2, ~8 steps)", "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
+        { "DreamShaper 8 LCM  (SD1.5 turbo, ~6 steps)",            "Lykon/dreamshaper-8-lcm:DreamShaper8_LCM.safetensors" },
+        { "SD-Turbo  (small/fast, ~4 steps, low CFG)",             "stabilityai/sd-turbo:sd_turbo.safetensors" },
+        { "Stable Diffusion 1.5  (SD1.5 base)",                    "stable-diffusion-v1-5/stable-diffusion-v1-5:v1-5-pruned-emaonly.safetensors" },
+        { "Realistic Vision 6  (SD1.5, photoreal)",                "SG161222/Realistic_Vision_V6.0_B1_noVAE:Realistic_Vision_V6.0_NV_B1_fp16.safetensors" },
+        { "All-In-One Pixel  (pixelsprite / 16bitscene)",          "PublicPrompts/All-In-One-Pixel-Model:Public-Prompts-Pixel-Model.ckpt" },
+        { "Pixel-Art Style  (pixelartstyle)",                      "kohbanye/pixel-art-style:pixel-art-style.ckpt" },
+        { "Pixel SpriteSheet  (PixelartFSS)",                      "Onodofthenorth/SD_PixelArt_SpriteSheet_Generator:PixelartSpritesheet_V.1.ckpt" },
+        { "Voxel Art  (VoxelArt)",                                 "Fictiverse/Stable_Diffusion_VoxelArt_Model:VoxelArt_v1.safetensors" },
+        { "Paper Cut  (PaperCut)",                                 "Fictiverse/Stable_Diffusion_PaperCut_Model:PaperCut_v1.safetensors" },
+    };
+    g_loras = {
+        { "PixelArtRedmond  (SD1.5, trigger PIXARFK)", "artificialguybr/pixelartredmond-1-5v-pixel-art-loras-for-sd-1-5:PixelArtRedmond15V-PixelArt-PIXARFK.safetensors" },
+        { "Pixel Art XL  (SDXL, trigger pixel)",       "nerijs/pixel-art-xl:pixel-art-xl.safetensors" },
+    };
+}
+
 static QString findSdCli(const QString& backend) {
     QString base = g_cfg.sdRoot + "/" + backend;
 #ifdef Q_OS_WIN
@@ -70,6 +98,69 @@ static QString probeBackend(const QString& backend) {
     }
     lines.removeDuplicates();
     return backend + ":\n  " + (lines.isEmpty() ? QString("(installed; no device info)") : lines.join("\n  "));
+}
+
+static const QString kRepo = "computergeek1507/sd-studio";
+
+// Parse a models.json payload into the preset lists (keeps current list if empty/invalid).
+static bool applyPresetsJson(const QByteArray& data) {
+    const QJsonObject o = QJsonDocument::fromJson(data).object();
+    auto parse = [](const QJsonArray& arr, QList<Preset>& out) {
+        if (arr.isEmpty()) return;
+        QList<Preset> tmp;
+        for (const QJsonValue& v : arr) {
+            const QJsonObject e = v.toObject();
+            if (e.contains("name") && e.contains("checkpoint"))
+                tmp.push_back({ e["name"].toString(), e["checkpoint"].toString() });
+        }
+        if (!tmp.isEmpty()) out = tmp;
+    };
+    if (o.isEmpty()) return false;
+    parse(o.value("models").toArray(), g_models);
+    parse(o.value("loras").toArray(), g_loras);
+    return true;
+}
+
+// Bundled fallback: a models.json shipped next to the executable.
+static void loadLocalPresets() {
+    QFile f(QCoreApplication::applicationDirPath() + "/models.json");
+    if (f.open(QIODevice::ReadOnly) && applyPresetsJson(f.readAll()))
+        g_log("Loaded bundled models.json");
+}
+
+// Most-current source: models.json from the repo (falls back to local/built-in on failure).
+static void fetchPresets(QNetworkAccessManager* nam) {
+    QNetworkRequest req(QUrl("https://raw.githubusercontent.com/" + kRepo + "/main/models.json"));
+    QNetworkReply* rep = nam->get(req);
+    QObject::connect(rep, &QNetworkReply::finished, [rep]() {
+        rep->deleteLater();
+        if (rep->error() != QNetworkReply::NoError) { g_log("Model list: using bundled/built-in (offline)"); return; }
+        if (applyPresetsJson(rep->readAll()))
+            g_log(QString("Model list updated from GitHub (%1 models, %2 LoRAs)").arg(g_models.size()).arg(g_loras.size()));
+    });
+}
+
+// Compare the built-from commit SHA against the latest commit on main.
+static void checkForUpdates(QNetworkAccessManager* nam, QWidget* parent) {
+    const QString cur = QString(SDSTUDIO_VERSION);
+    if (cur == "dev") return;   // local/dev build, nothing to compare
+    QNetworkRequest req(QUrl("https://api.github.com/repos/" + kRepo + "/commits/main"));
+    req.setRawHeader("Accept", "application/vnd.github+json");
+    QNetworkReply* rep = nam->get(req);
+    QObject::connect(rep, &QNetworkReply::finished, [rep, parent, cur]() {
+        rep->deleteLater();
+        if (rep->error() != QNetworkReply::NoError) return;
+        const QString latest = QJsonDocument::fromJson(rep->readAll()).object().value("sha").toString().left(7);
+        if (latest.isEmpty()) return;
+        if (latest != cur) {
+            g_log("Update available: latest " + latest + " (you have " + cur + ")");
+            QMessageBox::information(parent, "Update available",
+                "A newer SD Studio build is available.\n\nYou have: " + cur + "\nLatest: " + latest +
+                "\n\nDownload: https://github.com/" + kRepo + "/releases");
+        } else {
+            g_log("SD Studio is up to date (" + cur + ")");
+        }
+    });
 }
 
 static QString resolveModel(const QString& name) {
@@ -406,8 +497,11 @@ int main(int argc, char** argv) {
     g_cfg.backend   = st.value("backend", g_cfg.backend).toString();
     g_cfg.port      = st.value("port", g_cfg.port).toInt();
 
+    loadBuiltinPresets();   // baseline
+    loadLocalPresets();     // bundled models.json next to the exe (overrides built-in)
+
     QWidget win;
-    win.setWindowTitle("SD Studio");
+    win.setWindowTitle(QString("SD Studio  (%1)").arg(SDSTUDIO_VERSION));
     win.resize(1120, 740);
     auto* outer = new QHBoxLayout(&win);
 
@@ -573,25 +667,16 @@ int main(int argc, char** argv) {
 
     // model download (Hugging Face) via QNetworkAccessManager
     auto* nam = new QNetworkAccessManager(&win);
+    fetchPresets(nam);              // refresh model/LoRA lists from the repo (offline -> built-in)
+    checkForUpdates(nam, &win);     // notify if a newer build exists
     QObject::connect(dlBtn, &QPushButton::clicked, [&, nam]() {
-        const QList<QPair<QString, QString>> presets = {
-            { "DreamShaper XL Turbo  (best quality; CFG~2, ~8 steps)", "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
-            { "DreamShaper 8 LCM  (SD1.5 turbo, ~6 steps)",            "Lykon/dreamshaper-8-lcm:DreamShaper8_LCM.safetensors" },
-            { "SD-Turbo  (small/fast, ~4 steps, low CFG)",             "stabilityai/sd-turbo:sd_turbo.safetensors" },
-            { "Stable Diffusion 1.5  (SD1.5 base; use with SD1.5 LoRA)", "stable-diffusion-v1-5/stable-diffusion-v1-5:v1-5-pruned-emaonly.safetensors" },
-            { "Realistic Vision 6  (SD1.5, photoreal)",                "SG161222/Realistic_Vision_V6.0_B1_noVAE:Realistic_Vision_V6.0_NV_B1_fp16.safetensors" },
-            { "All-In-One Pixel  (pixelsprite / 16bitscene)", "PublicPrompts/All-In-One-Pixel-Model:Public-Prompts-Pixel-Model.ckpt" },
-            { "Pixel-Art Style  (pixelartstyle)",             "kohbanye/pixel-art-style:pixel-art-style.ckpt" },
-            { "Pixel SpriteSheet  (PixelartFSS)",             "Onodofthenorth/SD_PixelArt_SpriteSheet_Generator:PixelartSpritesheet_V.1.ckpt" },
-            { "Voxel Art  (VoxelArt)",                        "Fictiverse/Stable_Diffusion_VoxelArt_Model:VoxelArt_v1.safetensors" },
-            { "Paper Cut  (PaperCut)",                        "Fictiverse/Stable_Diffusion_PaperCut_Model:PaperCut_v1.safetensors" },
-            { "Custom (repo:file)...",                        "" },
-        };
-        QStringList names; for (auto& p : presets) names << p.first;
+        QStringList names; for (const Preset& p : g_models) names << p.name;
+        names << "Custom (repo:file)...";
         bool ok = false;
-        QString choice = QInputDialog::getItem(&win, "Download model", "Model:", names, 0, false, &ok);
+        const QString choice = QInputDialog::getItem(&win, "Download model", "Model:", names, 0, false, &ok);
         if (!ok) return;
-        QString ref = presets[names.indexOf(choice)].second;
+        const int idx = names.indexOf(choice);
+        QString ref = (idx >= 0 && idx < g_models.size()) ? g_models[idx].ref : QString();
         if (ref.isEmpty()) ref = QInputDialog::getText(&win, "Custom model", "repo:file", QLineEdit::Normal, "", &ok);
         if (!ok || !ref.contains(':')) return;
         const QString repo = ref.section(':', 0, 0), file = ref.section(':', 1);
@@ -604,16 +689,13 @@ int main(int argc, char** argv) {
 
     // LoRA download (Hugging Face) -> <modelsDir>/loras
     QObject::connect(loraDL, &QPushButton::clicked, [&, nam]() {
-        const QList<QPair<QString, QString>> presets = {
-            { "PixelArtRedmond  (SD1.5, trigger PIXARFK)", "artificialguybr/pixelartredmond-1-5v-pixel-art-loras-for-sd-1-5:PixelArtRedmond15V-PixelArt-PIXARFK.safetensors" },
-            { "Pixel Art XL  (SDXL, trigger pixel)",       "nerijs/pixel-art-xl:pixel-art-xl.safetensors" },
-            { "Custom (repo:file)...",                     "" },
-        };
-        QStringList names; for (auto& p : presets) names << p.first;
+        QStringList names; for (const Preset& p : g_loras) names << p.name;
+        names << "Custom (repo:file)...";
         bool ok = false;
-        QString choice = QInputDialog::getItem(&win, "Download LoRA", "LoRA:", names, 0, false, &ok);
+        const QString choice = QInputDialog::getItem(&win, "Download LoRA", "LoRA:", names, 0, false, &ok);
         if (!ok) return;
-        QString ref = presets[names.indexOf(choice)].second;
+        const int idx = names.indexOf(choice);
+        QString ref = (idx >= 0 && idx < g_loras.size()) ? g_loras[idx].ref : QString();
         if (ref.isEmpty()) ref = QInputDialog::getText(&win, "Custom LoRA", "repo:file", QLineEdit::Normal, "", &ok);
         if (!ok || !ref.contains(':')) return;
         const QString repo = ref.section(':', 0, 0), file = ref.section(':', 1);
