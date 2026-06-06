@@ -144,6 +144,9 @@ static GenRes generate(GenReq r) {
         "-W", QString::number(r.width > 0 ? r.width : g_cfg.width),
         "-H", QString::number(r.height > 0 ? r.height : g_cfg.height),
         "-o", out };
+    // LCM-distilled models require the LCM scheduler to produce good output.
+    if (QFileInfo(model).fileName().contains("lcm", Qt::CaseInsensitive))
+        args << "--sampling-method" << "lcm";
     if (r.seed >= 0) args << "-s" << QString::number(r.seed);
     if (!r.lora.isEmpty()) args << "--lora-model-dir" << (g_cfg.modelsDir + "/loras");
 
@@ -485,7 +488,8 @@ int main(int argc, char** argv) {
     QObject::connect(model, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) {
         const QString n = model->currentText().toLower();
         if (n.isEmpty()) return;
-        if      (n.contains("turbo"))     { steps->setValue(8);  cfg->setValue(2.0); }
+        if      (n.contains("lcm"))       { steps->setValue(6);  cfg->setValue(1.5); }
+        else if (n.contains("turbo"))     { steps->setValue(8);  cfg->setValue(2.0); }
         else if (n.contains("lightning")) { steps->setValue(6);  cfg->setValue(1.5); }
         else if (n.contains("xl"))        { steps->setValue(26); cfg->setValue(6.0); }
         else                              { steps->setValue(20); cfg->setValue(7.0); }
@@ -526,7 +530,9 @@ int main(int argc, char** argv) {
     auto* nam = new QNetworkAccessManager(&win);
     QObject::connect(dlBtn, &QPushButton::clicked, [&, nam]() {
         const QList<QPair<QString, QString>> presets = {
-            { "DreamShaper XL Turbo  (best quality; set CFG~2, steps~8)", "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
+            { "DreamShaper XL Turbo  (best quality; CFG~2, ~8 steps)", "Lykon/dreamshaper-xl-v2-turbo:DreamShaperXL_Turbo_v2_1.safetensors" },
+            { "DreamShaper 8 LCM  (SD1.5 turbo, ~6 steps)",            "Lykon/dreamshaper-8-lcm:DreamShaper8_LCM.safetensors" },
+            { "SD-Turbo  (small/fast, ~4 steps, low CFG)",             "stabilityai/sd-turbo:sd_turbo.safetensors" },
             { "All-In-One Pixel  (pixelsprite / 16bitscene)", "PublicPrompts/All-In-One-Pixel-Model:Public-Prompts-Pixel-Model.ckpt" },
             { "Pixel-Art Style  (pixelartstyle)",             "kohbanye/pixel-art-style:pixel-art-style.ckpt" },
             { "Pixel SpriteSheet  (PixelartFSS)",             "Onodofthenorth/SD_PixelArt_SpriteSheet_Generator:PixelartSpritesheet_V.1.ckpt" },
