@@ -37,6 +37,26 @@ jobs:
           name: sd_studio-linux-x64
           path: build/sd_studio
 
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:kde-6.8
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: SDStudio.flatpak
+          manifest-path: io.github.computergeek1507.SDStudio.yaml
+          cache-key: flatpak-builder-${{ github.sha }}
+      - name: Publish flatpak to release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SDStudio.flatpak
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'continuous' }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
   windows:
     runs-on: windows-latest
     steps:

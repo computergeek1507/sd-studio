@@ -151,7 +151,16 @@ static GenRes generate(GenReq r) {
     QElapsedTimer timer; timer.start();
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
-    proc.start(sd, args);
+    // Inside a Flatpak the sandbox can't exec the host GPU binary; run it on the
+    // host via flatpak-spawn (needs --talk-name=org.freedesktop.Flatpak).
+    QString program = sd;
+    QStringList runArgs = args;
+    if (QFileInfo::exists("/.flatpak-info")) {
+        runArgs.prepend(sd);
+        runArgs.prepend("--host");
+        program = "flatpak-spawn";
+    }
+    proc.start(program, runArgs);
     if (!proc.waitForStarted(5000)) { res.error = "failed to start sd-cli"; return res; }
     while (proc.state() != QProcess::NotRunning) {
         proc.waitForFinished(100);

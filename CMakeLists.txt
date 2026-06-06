@@ -19,3 +19,15 @@ if(WIN32)
     target_sources(sd_studio PRIVATE app.rc)   # embeds sd_studio.ico as the exe icon
 endif()
 target_link_libraries(sd_studio PRIVATE Qt6::Widgets Qt6::Network)
+
+# Install rules (used by Flatpak / Linux packaging).
+include(GNUInstallDirs)
+install(TARGETS sd_studio RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(UNIX AND NOT APPLE)
+    set(SDSTUDIO_APPID io.github.computergeek1507.SDStudio)
+    install(FILES sd_studio.png
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps
+            RENAME ${SDSTUDIO_APPID}.png)
+    install(FILES ${SDSTUDIO_APPID}.desktop
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+endif()

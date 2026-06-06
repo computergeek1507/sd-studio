@@ -1,0 +1,23 @@
+id: io.github.computergeek1507.SDStudio
+runtime: org.kde.Platform
+runtime-version: '6.8'
+sdk: org.kde.Sdk
+command: sd_studio
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri                              # GPU access for the preview
+  - --share=network                           # embedded HTTP server + model downloads
+  - --filesystem=home                         # models, loras, and the host sd-cli
+  - --talk-name=org.freedesktop.Flatpak       # flatpak-spawn --host to run sd-cli on the host
+
+modules:
+  - name: sd-studio
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: .

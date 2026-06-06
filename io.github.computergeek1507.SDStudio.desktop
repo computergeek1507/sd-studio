@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SD Studio
+GenericName=Stable Diffusion Studio
+Comment=Generate images with Stable Diffusion (GUI + OpenAI-style HTTP server)
+Exec=sd_studio
+Icon=io.github.computergeek1507.SDStudio
+Terminal=false
+Categories=Graphics;2DGraphics;ArtisticSoftware;

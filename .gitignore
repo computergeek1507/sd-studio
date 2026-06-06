@@ -10,6 +10,12 @@ dist/
 *.res
 *.zip
 
+# flatpak build
+.flatpak-builder/
+flatpak-build/
+build-dir/
+*.flatpak
+
 # generated / temp images
 icon_raw.png
 exe_icon_check.png
